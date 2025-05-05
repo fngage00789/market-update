@@ -1,4 +1,6 @@
+--only-binary :all:
 discord.py==2.3.2
 python-dotenv==1.0.0
 yfinance==0.2.31
-pandas==2.0.3
+pandas==2.2.1
+numpy==1.26.4
