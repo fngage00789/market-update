@@ -1,12 +1,4 @@
-# Prefer binary wheels for faster installation
---only-binary :all:
-
-# Core dependencies
-discord.py==2.3.2
-python-dotenv==1.0.0
-
-# Financial data with version pins for compatibility
-yfinance==0.2.31
-pandas==2.1.4  # More stable than 2.2.x for deployment
-numpy==1.24.4  # Known working version
+flask==2.0.1
 gunicorn==20.1.0
+python-dotenv==0.19.0
+requests==2.26.0
