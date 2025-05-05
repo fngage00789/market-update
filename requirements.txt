@@ -9,3 +9,4 @@ python-dotenv==1.0.0
 yfinance==0.2.31
 pandas==2.1.4  # More stable than 2.2.x for deployment
 numpy==1.24.4  # Known working version
+gunicorn==20.1.0
