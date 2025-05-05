@@ -1,186 +1,152 @@
-import os
-import discord
-from discord.ext import commands
-from dotenv import load_dotenv
+import requests
+from bs4 import BeautifulSoup
 import yfinance as yf
-import pandas as pd
 from datetime import datetime
+import time
+import pytz
 
-# Initialize environment
-load_dotenv()
-TOKEN = os.getenv('DISCORD_TOKEN')
-
-# Bot setup
-intents = discord.Intents.default()
-intents.message_content = True
-client = commands.Bot(command_prefix='!', intents=intents)
-
-def get_market_data(ticker, period='2d'):
-    """
-    Get OHLCV + Change data using pandas
-    Returns: Dictionary with price, change, range, volume
-    """
-    data = yf.Ticker(ticker).history(period=period)
-    latest = data.iloc[-1]
-    
-    if len(data) > 1:
-        prev_close = data.iloc[-2]['Close']
-        change_pct = (latest['Close'] - prev_close) / prev_close * 100
-    else:
-        change_pct = 0
-    
-    return {
-        'current': latest['Close'],
-        'change': change_pct,
-        'high': latest['High'],
-        'low': latest['Low'],
-        'volume': format_volume(latest['Volume']),
-        'currency': get_currency(ticker),
-        'time': latest.name.strftime('%Y-%m-%d %H:%M')
-    }
-
-def format_volume(volume):
-    """Format volume for display"""
-    if volume >= 1e9:
-        return f"{volume/1e9:.2f}B"
-    elif volume >= 1e6:
-        return f"{volume/1e6:.1f}M"
-    return f"{volume:,.0f}"
-
-def get_currency(ticker):
-    """Determine currency based on ticker"""
-    if '=X' in ticker:
-        return 'FX'
-    elif ticker in ['GC=F', 'SI=F']:
-        return 'USD'
-    elif ticker == '^NDX':
-        return 'USD'
-    return 'USD'
-
-@client.event
-async def on_ready():
-    print(f'{client.user.name} connected (ID: {client.user.id})')
-    print(f'Bot ready at {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
-
-@client.command()
-async def gold(ctx):
-    """Get spot gold prices with market data"""
+def get_gold_data():
     try:
-        data = get_market_data("GC=F")
+        gold = yf.Ticker("GC=F")
+        gold_info = gold.history(period="1d")
         
-        embed = discord.Embed(
-            title="💰 XAU/USD (Gold Spot)",
-            description=f"**Current Price:** {data['currency']}{data['current']:,.2f}",
-            color=0xFFD700,
-            timestamp=datetime.now()
-        )
-        
-        embed.add_field(name="24h Range", 
-                      value=f"{data['currency']}{data['low']:,.2f} - {data['currency']}{data['high']:,.2f}", 
-                      inline=True)
-        
-        embed.add_field(name="24h Change", 
-                      value=f"{'📈' if data['change'] >=0 else '📉'} {abs(data['change']):.2f}%", 
-                      inline=True)
-        
-        embed.add_field(name="Volume", 
-                      value=data['volume'], 
-                      inline=True)
-        
-        embed.set_footer(text=f"Last update: {data['time']} | Data via Yahoo Finance")
-        
-        await ctx.send(embed=embed)
-        
+        if not gold_info.empty:
+            current_price = gold_info['Close'].iloc[-1]
+            prev_close = gold_info['Close'].iloc[-2] if len(gold_info) > 1 else current_price
+            open_price = gold_info['Open'].iloc[-1]
+            day_low = gold_info['Low'].iloc[-1]
+            day_high = gold_info['High'].iloc[-1]
+            change = current_price - prev_close
+            change_percent = (change / prev_close) * 100
+            
+            utc_now = datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            
+            gold_output = f"""🏆 Gold Trading Data
+Current gold prices as of {utc_now}
+Gold Futures / US Dollar {'🟢' if change >= 0 else '🔴'}
+Symbol: GC=F
+Metal: XAU (Gold)
+Currency: USD
+Exchange: CMX
+Current Price: ${current_price:,.3f}
+Previous Close: ${prev_close:,.3f}
+Open Price: ${open_price:,.3f}
+Day Low: ${day_low:,.3f}
+Day High: ${day_high:,.3f}
+Change: {change:+.2f} ({change_percent:+.2f}%)
+"""
+            return gold_output
     except Exception as e:
-        await ctx.send("❌ Error fetching gold data. Try again later.")
-        print(f"[GOLD ERROR] {datetime.now()}: {str(e)}")
+        print(f"Error fetching gold data: {e}")
+    return None
 
-@client.command()
-async def nas100(ctx):
-    """Get NASDAQ-100 index data"""
+def get_forex_data():
     try:
-        data = get_market_data("^NDX")
+        forex = yf.Ticker("EURUSD=X")
+        forex_info = forex.history(period="1d")
         
-        embed = discord.Embed(
-            title="📊 NASDAQ-100 Index",
-            description=f"**Current Price:** {data['currency']}{data['current']:,.2f}",
-            color=0x9B59B6,
-            timestamp=datetime.now()
-        )
-        
-        embed.add_field(name="24h Range", 
-                      value=f"{data['currency']}{data['low']:,.2f} - {data['currency']}{data['high']:,.2f}", 
-                      inline=True)
-        
-        embed.add_field(name="24h Change", 
-                      value=f"{'📈' if data['change'] >=0 else '📉'} {abs(data['change']):.2f}%", 
-                      inline=True)
-        
-        embed.add_field(name="Volume", 
-                      value=data['volume'], 
-                      inline=True)
-        
-        embed.set_footer(text=f"Last update: {data['time']} | Data via Yahoo Finance")
-        
-        await ctx.send(embed=embed)
-        
+        if not forex_info.empty:
+            current_rate = forex_info['Close'].iloc[-1]
+            prev_close = forex_info['Close'].iloc[-2] if len(forex_info) > 1 else current_rate
+            open_rate = forex_info['Open'].iloc[-1]
+            day_low = forex_info['Low'].iloc[-1]
+            day_high = forex_info['High'].iloc[-1]
+            change = current_rate - prev_close
+            change_percent = (change / prev_close) * 100
+            
+            # Get 52-week range (approximation)
+            yearly_data = forex.history(period="1y")
+            year_low = yearly_data['Low'].min()
+            year_high = yearly_data['High'].max()
+            
+            utc_now = datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            
+            forex_output = f"""Current rates as of {utc_now}
+EUR/USD {'🟢' if change >= 0 else '🔴'}
+Current Rate: {current_rate:.5f}
+Previous Close: {prev_close:.5f}
+Open: {open_rate:.5f}
+Day Range: {day_low:.5f} - {day_high:.5f}
+52 Week Range: {year_low:.5f} - {year_high:.5f}
+Day Change: {change:+.5f} ({change_percent:+.2f}%)
+Volume: 0
+"""
+            return forex_output
     except Exception as e:
-        await ctx.send("❌ Error fetching NASDAQ data. Try again later.")
-        print(f"[NASDAQ ERROR] {datetime.now()}: {str(e)}")
+        print(f"Error fetching forex data: {e}")
+    return None
 
-@client.command()
-async def forex(ctx, pair: str = "USD/EUR"):
-    """Get forex exchange rates (e.g. !forex USD/JPY)"""
+def get_nasdaq_data():
     try:
-        base, target = pair.upper().split('/')
-        data = get_market_data(f"{base}{target}=X")
+        nasdaq = yf.Ticker("^NDX")
+        nasdaq_info = nasdaq.history(period="1d")
         
-        embed = discord.Embed(
-            title=f"💱 {pair.upper()} Exchange Rate",
-            description=f"**1 {base} = {data['current']:.4f} {target}**",
-            color=0x3498DB,
-            timestamp=datetime.now()
-        )
-        
-        embed.add_field(name="24h Range", 
-                      value=f"{data['low']:.4f} - {data['high']:.4f}", 
-                      inline=True)
-        
-        embed.add_field(name="24h Change", 
-                      value=f"{'📈' if data['change'] >=0 else '📉'} {abs(data['change']):.2f}%", 
-                      inline=True)
-        
-        embed.set_footer(text=f"Last update: {data['time']} | Data via Yahoo Finance")
-        
-        await ctx.send(embed=embed)
-        
-    except ValueError:
-        await ctx.send("❌ Invalid format. Use: `!forex BASE/TARGET` (e.g. `!forex USD/JPY`)")
+        if not nasdaq_info.empty:
+            current_price = nasdaq_info['Close'].iloc[-1]
+            prev_close = nasdaq_info['Close'].iloc[-2] if len(nasdaq_info) > 1 else current_price
+            open_price = nasdaq_info['Open'].iloc[-1]
+            day_low = nasdaq_info['Low'].iloc[-1]
+            day_high = nasdaq_info['High'].iloc[-1]
+            change = current_price - prev_close
+            change_percent = (change / prev_close) * 100
+            
+            # Get 52-week data
+            yearly_data = nasdaq.history(period="1y")
+            year_low = yearly_data['Low'].min()
+            year_high = yearly_data['High'].max()
+            from_year_high = ((current_price - year_high) / year_high) * 100
+            from_year_low = ((current_price - year_low) / year_low) * 100
+            
+            utc_now = datetime.now(pytz.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            
+            nasdaq_output = f"""Current price as of {utc_now}
+^NDX {'🟢' if change >= 0 else '🔴'}
+Index: NASDAQ-100 (NDX)
+Current Price: {current_price:,.2f}
+Previous Close: {prev_close:,.2f}
+Open: {open_price:,.2f}
+Day Range: {day_low:,.2f} - {day_high:,.2f}
+52 Week Range: {year_low:,.2f} - {year_high:,.2f}
+From 52W High: {from_year_high:+.2f}%
+From 52W Low: {from_year_low:+.2f}%
+Day Change: {change:+.2f} ({change_percent:+.2f}%)
+Volume: {nasdaq_info['Volume'].iloc[-1]:,.0f}
+Avg Volume (3m): 0
+"""
+            return nasdaq_output
     except Exception as e:
-        await ctx.send("❌ Error fetching forex data. Try again later.")
-        print(f"[FOREX ERROR] {datetime.now()}: {str(e)}")
+        print(f"Error fetching NASDAQ data: {e}")
+    return None
 
-@client.command()
-async def help_bot(ctx):
-    """Show available commands"""
-    embed = discord.Embed(
-        title="📊 Market Bot Help",
-        description="Real-time market data from Yahoo Finance",
-        color=0x7289DA
-    )
+def get_all_data():
+    gold_data = get_gold_data()
+    forex_data = get_forex_data()
+    nasdaq_data = get_nasdaq_data()
     
-    embed.add_field(
-        name="Available Commands",
-        value=(
-            "`!gold` - Spot gold prices (XAU/USD)\n"
-            "`!nas100` - NASDAQ-100 index\n"
-            "`!forex [pair]` - Forex rates (e.g. `!forex USD/JPY`)\n"
-            "`!help_bot` - Show this help message"
-        ),
-        inline=False
-    )
+    output = ""
+    if gold_data:
+        output += gold_data + "\n\n"
+    if forex_data:
+        output += forex_data + "\n\n"
+    if nasdaq_data:
+        output += nasdaq_data + "\n"
     
-    embed.set_footer(text="Data updates may have 15-20 minute delay")
-    await ctx.send(embed=embed)
+    return output.strip()
 
-client.run(TOKEN)
+def auto_update(interval=300):  # 5 minutes by default
+    while True:
+        try:
+            data = get_all_data()
+            print(data)
+            print("\n" + "="*50 + "\n")  # Separator between updates
+        except Exception as e:
+            print(f"Error during update: {e}")
+        
+        time.sleep(interval)
+
+if __name__ == "__main__":
+    # Initial data fetch
+    print(get_all_data())
+    
+    # Start auto-update service
+    auto_update()
